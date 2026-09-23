@@ -1,13 +1,12 @@
-// 🌟 Import the exact, direct functions from the Firebase Admin sub-modules
-const { initializeApp } = require('firebase-admin/app');
-const { cert } = require('firebase-admin/credential');
+// 🌟 Fixed: Import both initializeApp AND cert directly from 'firebase-admin/app'
+const { initializeApp, cert } = require('firebase-admin/app');
 const { getMessaging } = require('firebase-admin/messaging');
 const axios = require('axios');
 
 // 1. Initialize Firebase Admin using your downloaded Spark Plan credentials
 const serviceAccount = require('./quake-station-firebase-adminsdk-fbsvc-a63034f825.json');
 
-// 🌟 Modern v12+ initialization syntax
+// Initialize with the clean sub-module functions
 initializeApp({
   credential: cert(serviceAccount)
 });
@@ -60,7 +59,7 @@ async function checkAndBroadcastEarthquakes() {
         }
       };
 
-      // 🌟 Modern syntax: Use getMessaging() instead of admin.messaging()
+      // Modern syntax: Use getMessaging() instead of admin.messaging()
       await getMessaging().send(payload);
       console.log(`📡 Broadcasted alert for ${id} to topic: ${targetGridTopic}`);
     }
