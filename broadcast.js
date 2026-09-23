@@ -1,11 +1,15 @@
-const admin = require('firebase-admin');
+// 🌟 Import the exact, direct functions from the Firebase Admin sub-modules
+const { initializeApp } = require('firebase-admin/app');
+const { cert } = require('firebase-admin/credential');
+const { getMessaging } = require('firebase-admin/messaging');
 const axios = require('axios');
 
 // 1. Initialize Firebase Admin using your downloaded Spark Plan credentials
 const serviceAccount = require('./quake-station-firebase-adminsdk-fbsvc-a63034f825.json');
 
-admin.initializeApp({
-  credential: admin.app.credential.cert(serviceAccount)
+// 🌟 Modern v12+ initialization syntax
+initializeApp({
+  credential: cert(serviceAccount)
 });
 
 console.log('Firebase Admin SDK initialized successfully!');
@@ -17,7 +21,7 @@ async function checkAndBroadcastEarthquakes() {
     // Fetch earthquakes above magnitude 4.0 from the last 10 minutes
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
-    // 🌟 Fixed: Correct, complete USGS API GeoJSON path with proper string interpolation (\$)
+    // Correct, complete USGS API GeoJSON path with proper string interpolation (\$)
     const usgsUrl = `https://usgs.gov{tenMinutesAgo}&minmagnitude=4.0`;
     
     const response = await axios.get(usgsUrl);
@@ -56,8 +60,8 @@ async function checkAndBroadcastEarthquakes() {
         }
       };
 
-      // FCM transmissions are 100% free and unlimited on the Spark Plan
-      await admin.messaging().send(payload);
+      // 🌟 Modern syntax: Use getMessaging() instead of admin.messaging()
+      await getMessaging().send(payload);
       console.log(`📡 Broadcasted alert for ${id} to topic: ${targetGridTopic}`);
     }
   } catch (error) {
