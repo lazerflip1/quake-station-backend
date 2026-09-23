@@ -21,7 +21,8 @@ async function checkAndBroadcastEarthquakes() {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
     // Correct, complete USGS API GeoJSON path with proper string interpolation (\$)
-    const usgsUrl = `https://usgs.gov{tenMinutesAgo}&minmagnitude=4.0`;
+    const usgsUrl = 'https://usgs.gov' + tenMinutesAgo + '&minmagnitude=4.0';
+
     
     const response = await axios.get(usgsUrl);
     const earthquakes = response.data.features;
