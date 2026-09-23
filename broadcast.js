@@ -20,8 +20,8 @@ async function checkAndBroadcastEarthquakes() {
     // Fetch earthquakes above magnitude 4.0 from the last 10 minutes
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
-    // Correct, complete USGS API GeoJSON path with proper string interpolation (\$)
-    const usgsUrl = 'https://usgs.gov' + tenMinutesAgo + '&minmagnitude=4.0';
+    // Correct, complete USGS API GeoJSON
+    const usgsUrl = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&endtime=' + tenMinutesAgo + '&minmagnitude=4'
 
     
     const response = await axios.get(usgsUrl);
