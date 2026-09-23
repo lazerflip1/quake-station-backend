@@ -1,11 +1,12 @@
 const admin = require('firebase-admin');
+const { credential } = require('firebase-admin');
 const axios = require('axios');
 
 // 1. Initialize Firebase Admin using your downloaded Spark Plan credentials
 const serviceAccount = require('./quake-station-firebase-adminsdk-fbsvc-a63034f825.json');
 
 admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount)
+  credential: credential.cert(serviceAccount)
 });
 
 async function checkAndBroadcastEarthquakes() {
