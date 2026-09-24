@@ -21,7 +21,7 @@ async function checkAndBroadcastEarthquakes() {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
     
     // Correct, complete USGS API GeoJSON
-    const usgsUrl = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=' + tenMinutesAgo + '&minmagnitude=4'
+    const usgsUrl = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&starttime=' + tenMinutesAgo + '&minmagnitude=1'
 
     
     const response = await axios.get(usgsUrl);
@@ -38,25 +38,23 @@ async function checkAndBroadcastEarthquakes() {
       const place = quake.properties.place;
       const [lng, lat] = quake.geometry.coordinates;
 
+      let alertEmoji = 'ℹ️'; 
+      if (mag >= 4.0) alertEmoji = '⚠️';
+      if (mag >= 6.0) alertEmoji = '🚨';
+
       // Match the topic naming convention used in your Angular app
       const targetGridTopic = `grid_lat${Math.round(lat)}_lng${Math.round(lng)}`;
 
       const payload = {
         topic: targetGridTopic,
-        notification: {
-          title: '⚠️ Earthquake Alert Nearby!',
-          body: `A magnitude ${mag} earthquake occurred near ${place}.`,
-        },
         data: {
           earthquakeId: id,
-          magnitude: mag.toString()
+          magnitude: mag.toString(),
+          title: `${alertEmoji} Earthquake Alert Nearby!`,
+          body: `A magnitude ${mag} earthquake occurred near ${place}.`
         },
         android: {
-          priority: 'high', // Bypasses Android battery saver restrictions
-          notification: {
-            sound: 'default',
-            clickAction: 'FCM_PLUGIN_ACTIVITY' // Ensures Capacitor opens the app on tap
-          }
+          priority: mag >= 4.0 ? 'high' : 'normal',
         }
       };
 
