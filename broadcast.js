@@ -72,7 +72,6 @@ async function testBroadcastScript() {
     console.log('🧪 RUNNING LOCAL BACKEND EMULATOR TEST...');
     console.log('📡 Broadcasting test payloads to the app dev track...');
     
-    // Mock earthquakes to check if your Angular slider works
     const mockEarthquakes = [
       { id: "mock_quake_minor", mag: "2.3", place: "Minor Tremor Alley" },
       { id: "mock_quake_major", mag: "5.7", place: "Major Fault Line Blvd" }
@@ -84,12 +83,13 @@ async function testBroadcastScript() {
       if (parseFloat(quake.mag) >= 6.0) alertEmoji = '🚨';
 
       const payload = {
-        topic: "global-test-feed", // App automatically listens to this dev track
+        topic: "global-test-feed",
+        // ✅ CRUCIAL FIX: Ensure every value in the data block is explicitly cast as a string
         data: {
-          earthquakeId: quake.id,
-          magnitude: quake.mag,
-          title: `${alertEmoji} Test Alert!`,
-          body: `A magnitude ${quake.mag} earthquake occurred near ${quake.place}.`
+          earthquakeId: String(quake.id),
+          magnitude: String(quake.mag),
+          title: String(`${alertEmoji} Test Alert!`),
+          body: String(`A magnitude ${quake.mag} earthquake occurred near ${quake.place}.`)
         },
         android: {
           priority: parseFloat(quake.mag) >= 4.0 ? 'high' : 'normal'
@@ -103,6 +103,7 @@ async function testBroadcastScript() {
     console.error('Error running testing script:', error);
   }
 }
+
 
 // ─── EXECUTION SWITCHBOARD ──────────────────────────────────────────────────
 // Toggle comment state on these two lines below to switch modes instantly!
