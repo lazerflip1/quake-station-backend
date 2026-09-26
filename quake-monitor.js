@@ -3,7 +3,6 @@ const { getMessaging } = require('firebase-admin/messaging');
 const { getFirestore } = require('firebase-admin/firestore');
 const axios = require('axios');
 
-// Initialize Firebase Admin using the credentials file created in CI from FIREBASE_KEY
 const serviceAccount = require('./quake-station-firebase-adminsdk-fbsvc-a63034f825.json');
 
 initializeApp({
@@ -56,6 +55,31 @@ function reasonForRule(rule) {
     : `In region: ${rule.region}`;
 }
 
+function buildAlertEmoji(mag) {
+  if (mag >= 6.0) return '🚨';
+  if (mag >= 4.0) return '⚠️';
+  return 'ℹ️';
+}
+
+function buildPayload({ token, quake, matchingRule, titlePrefix = '' }) {
+  const alertEmoji = buildAlertEmoji(quake.mag);
+  const title = `${alertEmoji} ${titlePrefix}Magnitude ${quake.mag} Earthquake`;
+  const body = `${quake.place} (${reasonForRule(matchingRule)})`;
+
+  return {
+    token,
+    notification: { title, body },
+    data: {
+      earthquakeId: String(quake.id),
+      magnitude: String(quake.mag),
+    },
+    android: {
+      priority: quake.mag >= 4.0 ? 'high' : 'normal',
+      notification: { channelId: 'default_channel_id' },
+    },
+  };
+}
+
 // ─── Notified-quake dedup (persisted in Firestore, survives across runs) ────
 async function loadNotifiedIds(deviceToken) {
   const snap = await db.collection(NOTIFIED_COLLECTION).doc(deviceToken).get();
@@ -89,136 +113,146 @@ async function fetchQuakes() {
   }));
 }
 
-// ─── Main ───────────────────────────────────────────────────────────────────
+// ─── Shared core: evaluate a list of quakes against every user's rules ─────
+//
+// Used by both the production path (real USGS quakes) and the filtering
+// test path (mock quakes). Handles the dedup bookkeeping and actually
+// sends via FCM. Set `dryRun: true` to log matches without sending or
+// touching the dedup store (useful for testing without spamming devices).
+async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = '' } = {}) {
+  if (quakes.length === 0) {
+    console.log('No quakes to process.');
+    return { sentCount: 0 };
+  }
+
+  const usersSnap = await db.collection('users').get();
+  console.log(`Loaded ${usersSnap.size} user(s).`);
+
+  let sentCount = 0;
+
+  for (const userDoc of usersSnap.docs) {
+    const user = userDoc.data();
+    const deviceToken = user.deviceToken || userDoc.id;
+
+    if (!user.globalEnabled) continue;
+    if (!Array.isArray(user.rules) || user.rules.length === 0) continue;
+    if (!deviceToken) continue;
+
+    const notifiedIds = dryRun ? new Set() : await loadNotifiedIds(deviceToken);
+    let changed = false;
+
+    for (const quake of quakes) {
+      if (!dryRun && notifiedIds.has(quake.id)) continue;
+      if (quake.mag == null || quake.mag < (user.globalMinMagnitude ?? 0)) {
+        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: below globalMinMagnitude (${user.globalMinMagnitude}).`);
+        continue;
+      }
+
+      const matchingRule = findMatchingRule(quake, user.rules);
+      if (!matchingRule) {
+        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: no matching rule.`);
+        continue;
+      }
+
+      const payload = buildPayload({ token: deviceToken, quake, matchingRule, titlePrefix });
+
+      if (dryRun) {
+        console.log(`[DRY RUN] Would notify ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id}, mag ${quake.mag})`);
+        sentCount++;
+        continue;
+      }
+
+      try {
+        await getMessaging().send(payload);
+        sentCount++;
+        notifiedIds.add(quake.id);
+        changed = true;
+        console.log(`📡 Notified ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id})`);
+      } catch (err) {
+        console.error(`Failed to notify ${deviceToken} for quake ${quake.id}:`, err.message);
+      }
+    }
+
+    if (!dryRun && changed) {
+      await saveNotifiedIds(deviceToken, notifiedIds);
+    }
+  }
+
+  console.log(`Done. ${dryRun ? 'Would have sent' : 'Sent'} ${sentCount} notification(s).`);
+  return { sentCount };
+}
+
+// ─── PRODUCTION ─────────────────────────────────────────────────────────────
 async function checkAndNotifyUsers() {
   try {
     console.log('Checking USGS for recent seismic activity...');
     const quakes = await fetchQuakes();
-
-    if (quakes.length === 0) {
-      console.log('No new earthquakes detected.');
-      return;
-    }
     console.log(`Fetched ${quakes.length} quake(s).`);
-
-    const usersSnap = await db.collection('users').get();
-    console.log(`Loaded ${usersSnap.size} user(s).`);
-
-    let sentCount = 0;
-
-    for (const userDoc of usersSnap.docs) {
-      const user = userDoc.data();
-      const deviceToken = user.deviceToken || userDoc.id;
-
-      if (!user.globalEnabled) continue;
-      if (!Array.isArray(user.rules) || user.rules.length === 0) continue;
-      if (!deviceToken) continue;
-
-      const notifiedIds = await loadNotifiedIds(deviceToken);
-      let changed = false;
-
-      for (const quake of quakes) {
-        if (notifiedIds.has(quake.id)) continue;
-        if (quake.mag == null || quake.mag < (user.globalMinMagnitude ?? 0)) continue;
-
-        const matchingRule = findMatchingRule(quake, user.rules);
-        if (!matchingRule) continue;
-
-        let alertEmoji = 'ℹ️';
-        if (quake.mag >= 4.0) alertEmoji = '⚠️';
-        if (quake.mag >= 6.0) alertEmoji = '🚨';
-
-        const payload = {
-          token: deviceToken,
-          notification: {
-            title: `${alertEmoji} Magnitude ${quake.mag} Earthquake`,
-            body: `${quake.place} (${reasonForRule(matchingRule)})`,
-          },
-          data: {
-            earthquakeId: String(quake.id),
-            magnitude: String(quake.mag),
-          },
-          android: {
-            priority: quake.mag >= 4.0 ? 'high' : 'normal',
-            notification: { channelId: 'default_channel_id' },
-          },
-        };
-
-        try {
-          await getMessaging().send(payload);
-          sentCount++;
-          notifiedIds.add(quake.id);
-          changed = true;
-          console.log(`📡 Notified ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id})`);
-        } catch (err) {
-          console.error(`Failed to notify ${deviceToken} for quake ${quake.id}:`, err.message);
-        }
-      }
-
-      if (changed) {
-        await saveNotifiedIds(deviceToken, notifiedIds);
-      }
-    }
-
-    console.log(`Done. Sent ${sentCount} notification(s).`);
+    await processQuakesForAllUsers(quakes);
   } catch (error) {
     console.error('Error running quake-monitor script:', error);
     process.exitCode = 1;
   }
 }
 
-// ─── TESTING ENGINE ─────────────────────────────────────────────────────────
+// ─── TESTING: raw delivery check (bypasses rules, always sends to one token) ─
 async function testQuakeMonitor() {
   try {
-    console.log('🧪 RUNNING LOCAL BACKEND EMULATOR TEST...');
-    console.log('📡 Sending mock quake alerts directly to a test device token...');
-
-    // Replace with a real device token captured from your own device
-    // (logged by EarthquakeNotificationService on the 'registration' event).
+    console.log('🧪 RUNNING LOCAL BACKEND EMULATOR TEST (raw delivery)...');
     const TEST_DEVICE_TOKEN = process.env.TEST_DEVICE_TOKEN;
-
     if (!TEST_DEVICE_TOKEN) {
-      console.error('❌ TEST_DEVICE_TOKEN is not set. Export it or add it as a secret before running the test.');
+      console.error('❌ TEST_DEVICE_TOKEN is not set.');
       return;
     }
 
     const mockQuakes = [
-      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Alley' },
-      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Line Blvd' },
+      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Alley', lat: 0, lng: 0 },
+      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Line Blvd', lat: 0, lng: 0 },
     ];
 
+    // Fake "always matching" rule just for the raw delivery smoke test.
+    const alwaysMatchRule = { id: 'test-rule', type: 'region', region: '', minMagnitude: 0 };
+
     for (const quake of mockQuakes) {
-      let alertEmoji = 'ℹ️';
-      if (quake.mag >= 4.0) alertEmoji = '⚠️';
-      if (quake.mag >= 6.0) alertEmoji = '🚨';
-
-      const payload = {
+      const payload = buildPayload({
         token: TEST_DEVICE_TOKEN,
-        notification: {
-          title: `${alertEmoji} Test Alert!`,
-          body: `A magnitude ${quake.mag} earthquake occurred near ${quake.place}.`,
-        },
-        data: {
-          earthquakeId: String(quake.id),
-          magnitude: String(quake.mag),
-        },
-        android: {
-          priority: quake.mag >= 4.0 ? 'high' : 'normal',
-          notification: { channelId: 'default_channel_id' },
-        },
-      };
-
+        quake,
+        matchingRule: alwaysMatchRule,
+        titlePrefix: 'Test: ',
+      });
       await getMessaging().send(payload);
       console.log(`📡 Successfully dispatched Mock Quake (Mag: ${quake.mag}) to test device`);
     }
 
-    console.log('✅ Test complete. Check your device for the notifications.');
+    console.log('✅ Raw delivery test complete.');
   } catch (error) {
-    console.error('Error running testing script:', error);
+    console.error('Error running testQuakeMonitor:', error);
   }
 }
-// ─── EXECUTION SWITCHBOARD ──────────────────────────────────────────────────
-// Toggle comment state on these two lines below to switch modes instantly!
 
-// checkAndNotifyUsers();     // 🟢 Uncomment for Production (rule matching + Firestore)
-testQuakeMonitor();           // 🔵 Uncomment for local device-token test
+// ─── TESTING: real filtering check (uses actual Firestore rules) ───────────
+async function testQuakeMonitorWithFiltering() {
+  try {
+    console.log('🧪 RUNNING FILTERING TEST (real rules, mock quakes)...');
+
+    const mockQuakes = [
+      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Alley', lat: 34.0522, lng: -118.2437 },
+      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Line Blvd', lat: 34.0522, lng: -118.2437 },
+    ];
+
+    // dryRun: true → logs what WOULD be sent per user's real rules, without
+    // actually calling FCM or touching the notified_quakes dedup store.
+    // Flip to false once you're happy with the logged decisions, to also
+    // receive the real push notifications on your device.
+    await processQuakesForAllUsers(mockQuakes, { dryRun: false, titlePrefix: 'Test: ' });
+
+    console.log('✅ Filtering test complete.');
+  } catch (error) {
+    console.error('Error running testQuakeMonitorWithFiltering:', error);
+  }
+}
+
+// ─── EXECUTION SWITCHBOARD ──────────────────────────────────────────────────
+// checkAndNotifyUsers();            // 🟢 Production (real USGS + real rules)
+// testQuakeMonitor();               // 🔵 Raw delivery smoke test (ignores rules)
+testQuakeMonitorWithFiltering();     // 🟡 Filtering test (mock quakes + real rules)
