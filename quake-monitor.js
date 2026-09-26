@@ -130,11 +130,13 @@ async function checkAndNotifyUsers() {
 
         const payload = {
           token: deviceToken,
+          notification: {
+            title: `${alertEmoji} Magnitude ${quake.mag} Earthquake`,
+            body: `${quake.place} (${reasonForRule(matchingRule)})`,
+          },
           data: {
             earthquakeId: String(quake.id),
             magnitude: String(quake.mag),
-            title: String(`${alertEmoji} Magnitude ${quake.mag} Earthquake`),
-            body: String(`${quake.place} (${reasonForRule(matchingRule)})`),
           },
           android: {
             priority: quake.mag >= 4.0 ? 'high' : 'normal',
@@ -192,11 +194,13 @@ async function testQuakeMonitor() {
 
       const payload = {
         token: TEST_DEVICE_TOKEN,
+        notification: {
+          title: `${alertEmoji} Test Alert!`,
+          body: `A magnitude ${quake.mag} earthquake occurred near ${quake.place}.`,
+        },
         data: {
           earthquakeId: String(quake.id),
           magnitude: String(quake.mag),
-          title: String(`${alertEmoji} Test Alert!`),
-          body: String(`A magnitude ${quake.mag} earthquake occurred near ${quake.place}.`),
         },
         android: {
           priority: quake.mag >= 4.0 ? 'high' : 'normal',
