@@ -24,4 +24,6 @@ jobs:
         run: echo '${{ secrets.FIREBASE_KEY }}' > quake-station-firebase-adminsdk-fbsvc-a63034f825.json
 
       - name: Execute Quake Monitor
+        env:
+          TEST_DEVICE_TOKEN: ${{ secrets.TEST_DEVICE_TOKEN }}
         run: node quake-monitor.js
