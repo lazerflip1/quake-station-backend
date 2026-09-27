@@ -33,7 +33,11 @@ function distanceKm(lat1, lon1, lat2, lon2) {
 }
 
 // ─── Rule matching (mirrors NotificationSettingsService.findMatchingRule) ───
-function findMatchingRule(quake, rules) {
+function findMatchingRule(quake, rules, globalMinMagnitude) {
+  if (quake.mag != null && globalMinMagnitude != null && quake.mag >= globalMinMagnitude) {
+    return { id: 'global', type: 'global', minMagnitude: globalMinMagnitude, label: 'anywhere in the world' };
+  }
+
   for (const rule of rules) {
     if (quake.mag == null || quake.mag < rule.minMagnitude) continue;
     const d = distanceKm(rule.latitude, rule.longitude, quake.lat, quake.lng);
@@ -43,6 +47,9 @@ function findMatchingRule(quake, rules) {
 }
 
 function reasonForRule(rule) {
+  if (rule.type === 'global') {
+    return `Magnitude ≥ ${rule.minMagnitude} anywhere in the world`;
+  }
   return `Within ${rule.radiusKm}km of ${rule.label}`;
 }
 
@@ -131,21 +138,18 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
 
     const notifiedIds = dryRun ? new Set() : await loadNotifiedIds(deviceToken);
     let changed = false;
-
+    
     for (const quake of quakes) {
       if (!dryRun && notifiedIds.has(quake.id)) continue;
-      if (quake.mag == null || quake.mag < (user.globalMinMagnitude ?? 0)) {
-        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: below globalMinMagnitude (${user.globalMinMagnitude}).`);
-        continue;
-      }
-
-      const matchingRule = findMatchingRule(quake, user.rules);
+    
+      const matchingRule = findMatchingRule(quake, user.rules, user.globalMinMagnitude);
       if (!matchingRule) {
-        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: no matching rule.`);
+        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: no matching rule (global or zone).`);
         continue;
       }
-
+    
       const payload = buildPayload({ token: deviceToken, quake, matchingRule, titlePrefix });
+    
 
       if (dryRun) {
         console.log(`[DRY RUN] Would notify ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id}, mag ${quake.mag})`);
