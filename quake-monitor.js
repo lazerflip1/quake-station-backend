@@ -181,6 +181,19 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
         console.log(`${quakeTag} ✅ NOTIFIED (rule: ${matchingRule.id}, mag ${quake.mag}).`);
       } catch (err) {
         console.error(`${quakeTag} ❌ SEND FAILED: ${err.message}`);
+
+        if (err.code === 'messaging/registration-token-not-registered') {
+          console.warn(`${userTag} Token no longer registered — removing user document from Firestore.`);
+          try {
+            await db.collection('users').doc(userDoc.id).delete();
+            await db.collection(NOTIFIED_COLLECTION).doc(deviceToken).delete().catch(() => {});
+            console.log(`${userTag} Cleaned up stale user (and dedup entry).`);
+          } catch (cleanupErr) {
+            console.error(`${userTag} Failed to clean up stale user:`, cleanupErr.message);
+          }
+          // Stop processing further quakes for this now-deleted user.
+          break;
+        }
       }
     }
 
@@ -217,8 +230,8 @@ async function testQuakeMonitor() {
     }
 
     const mockQuakes = [
-      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
-      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: `mock_quake_minor_${Date.now()}`, mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: `mock_quake_major_${Date.now()}`, mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
     ];
 
     // Fake "always matching" rule just for the raw delivery smoke test.
@@ -255,8 +268,8 @@ async function testQuakeMonitorWithFiltering() {
     console.log('🧪 RUNNING FILTERING TEST (real rules, mock quakes)...');
 
     const mockQuakes = [
-      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
-      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: `mock_quake_minor_${Date.now()}`, mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: `mock_quake_major_${Date.now()}`, mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
     ];
 
     // dryRun: true → logs what WOULD be sent per user's real rules, without
@@ -272,6 +285,6 @@ async function testQuakeMonitorWithFiltering() {
 }
 
 // ─── EXECUTION SWITCHBOARD ──────────────────────────────────────────────────
-// checkAndNotifyUsers();            // 🟢 Production (real USGS + real rules)
+checkAndNotifyUsers();            // 🟢 Production (real USGS + real rules)
 // testQuakeMonitor();               // 🔵 Raw delivery smoke test (ignores rules)
-testQuakeMonitorWithFiltering();     // 🟡 Filtering test (mock quakes + real rules)
+//testQuakeMonitorWithFiltering();     // 🟡 Filtering test (mock quakes + real rules)
