@@ -36,23 +36,14 @@ function distanceKm(lat1, lon1, lat2, lon2) {
 function findMatchingRule(quake, rules) {
   for (const rule of rules) {
     if (quake.mag == null || quake.mag < rule.minMagnitude) continue;
-
-    if (rule.type === 'location') {
-      const d = distanceKm(rule.latitude, rule.longitude, quake.lat, quake.lng);
-      if (d <= rule.radiusKm) return rule;
-    } else if (rule.type === 'region') {
-      if (quake.place.toLowerCase().includes(String(rule.region || '').toLowerCase())) {
-        return rule;
-      }
-    }
+    const d = distanceKm(rule.latitude, rule.longitude, quake.lat, quake.lng);
+    if (d <= rule.radiusKm) return rule;
   }
   return null;
 }
 
 function reasonForRule(rule) {
-  return rule.type === 'location'
-    ? `Within ${rule.radiusKm}km of ${rule.label}`
-    : `In region: ${rule.region}`;
+  return `Within ${rule.radiusKm}km of ${rule.label}`;
 }
 
 function buildAlertEmoji(mag) {
@@ -206,12 +197,20 @@ async function testQuakeMonitor() {
     }
 
     const mockQuakes = [
-      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Alley', lat: 0, lng: 0 },
-      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Line Blvd', lat: 0, lng: 0 },
+      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
     ];
 
     // Fake "always matching" rule just for the raw delivery smoke test.
-    const alwaysMatchRule = { id: 'test-rule', type: 'region', region: '', minMagnitude: 0 };
+    const alwaysMatchRule = {
+      id: 'test-rule',
+      type: 'region',
+      latitude: -6.2088,
+      longitude: 106.8456,
+      radiusKm: 100,
+      label: 'Test Area',
+      minMagnitude: 0,
+    };
 
     for (const quake of mockQuakes) {
       const payload = buildPayload({
@@ -236,8 +235,8 @@ async function testQuakeMonitorWithFiltering() {
     console.log('🧪 RUNNING FILTERING TEST (real rules, mock quakes)...');
 
     const mockQuakes = [
-      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Alley', lat: 34.0522, lng: -118.2437 },
-      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Line Blvd', lat: 34.0522, lng: -118.2437 },
+      { id: 'mock_quake_minor', mag: 2.3, place: 'Minor Tremor Jakarta City', lat: -6.2088, lng: 106.8456 },
+      { id: 'mock_quake_major', mag: 5.7, place: 'Major Fault Jakarta City', lat: -6.2088, lng: 106.8456 },
     ];
 
     // dryRun: true → logs what WOULD be sent per user's real rules, without
