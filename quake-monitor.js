@@ -119,40 +119,56 @@ async function fetchQuakes() {
 // touching the dedup store (useful for testing without spamming devices).
 async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = '' } = {}) {
   if (quakes.length === 0) {
-    console.log('No quakes to process.');
+    console.log('[processQuakes] No quakes to process.');
     return { sentCount: 0 };
   }
 
   const usersSnap = await db.collection('users').get();
-  console.log(`Loaded ${usersSnap.size} user(s).`);
+  console.log(`[processQuakes] Loaded ${usersSnap.size} user(s).`);
 
   let sentCount = 0;
 
   for (const userDoc of usersSnap.docs) {
     const user = userDoc.data();
     const deviceToken = user.deviceToken || userDoc.id;
+    const userTag = `[user:${userDoc.id.slice(0, 8)}...]`;
 
-    if (!user.globalEnabled) continue;
-    if (!Array.isArray(user.rules) || user.rules.length === 0) continue;
-    if (!deviceToken) continue;
+    if (!user.globalEnabled) {
+      console.log(`${userTag} SKIPPED USER: globalEnabled is false.`);
+      continue;
+    }
+    if (!Array.isArray(user.rules) || user.rules.length === 0) {
+      console.log(`${userTag} SKIPPED USER: no rules configured.`);
+      continue;
+    }
+    if (!deviceToken) {
+      console.log(`${userTag} SKIPPED USER: no deviceToken.`);
+      continue;
+    }
+
+    console.log(`${userTag} Evaluating with globalMinMagnitude=${user.globalMinMagnitude}, ${user.rules.length} rule(s): [${user.rules.map(r => `${r.label}(min:${r.minMagnitude}, r:${r.radiusKm}km)`).join(', ')}]`);
 
     const notifiedIds = dryRun ? new Set() : await loadNotifiedIds(deviceToken);
     let changed = false;
-    
+
     for (const quake of quakes) {
-      if (!dryRun && notifiedIds.has(quake.id)) continue;
-    
-      const matchingRule = findMatchingRule(quake, user.rules, user.globalMinMagnitude);
-      if (!matchingRule) {
-        console.log(`Skipped quake ${quake.id} (mag ${quake.mag}) for ${deviceToken}: no matching rule (global or zone).`);
+      const quakeTag = `${userTag} [quake:${quake.id}]`;
+
+      if (!dryRun && notifiedIds.has(quake.id)) {
+        console.log(`${quakeTag} SKIPPED: already notified (dedup).`);
         continue;
       }
-    
+
+      const matchingRule = findMatchingRule(quake, user.rules, user.globalMinMagnitude);
+      if (!matchingRule) {
+        console.log(`${quakeTag} SKIPPED: mag ${quake.mag} — no matching rule (global=${user.globalMinMagnitude}, zones checked: ${user.rules.length}).`);
+        continue;
+      }
+
       const payload = buildPayload({ token: deviceToken, quake, matchingRule, titlePrefix });
-    
 
       if (dryRun) {
-        console.log(`[DRY RUN] Would notify ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id}, mag ${quake.mag})`);
+        console.log(`${quakeTag} [DRY RUN] Would notify (rule: ${matchingRule.id}, mag ${quake.mag}).`);
         sentCount++;
         continue;
       }
@@ -162,9 +178,9 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
         sentCount++;
         notifiedIds.add(quake.id);
         changed = true;
-        console.log(`📡 Notified ${deviceToken} about quake ${quake.id} (rule: ${matchingRule.id})`);
+        console.log(`${quakeTag} ✅ NOTIFIED (rule: ${matchingRule.id}, mag ${quake.mag}).`);
       } catch (err) {
-        console.error(`Failed to notify ${deviceToken} for quake ${quake.id}:`, err.message);
+        console.error(`${quakeTag} ❌ SEND FAILED: ${err.message}`);
       }
     }
 
@@ -173,7 +189,7 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
     }
   }
 
-  console.log(`Done. ${dryRun ? 'Would have sent' : 'Sent'} ${sentCount} notification(s).`);
+  console.log(`[processQuakes] Done. ${dryRun ? 'Would have sent' : 'Sent'} ${sentCount} notification(s).`);
   return { sentCount };
 }
 
