@@ -96,7 +96,7 @@ async function saveNotifiedIds(deviceToken, idsSet) {
 
 // ─── USGS feed ────────────────────────────────────────────────────────────
 async function fetchQuakes() {
-  const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+  const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const url = USGS_URL_BASE + tenMinutesAgo;
 
   const response = await axios.get(url);
