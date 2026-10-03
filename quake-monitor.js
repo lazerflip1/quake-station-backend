@@ -99,8 +99,13 @@ async function fetchQuakes() {
   const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
   const url = USGS_URL_BASE + tenMinutesAgo;
 
+  console.log(`[fetchQuakes] Querying: ${url}`);
+  console.log(`[fetchQuakes] Current time (Date.now()): ${new Date().toISOString()}`);
+
   const response = await axios.get(url);
   const features = response.data.features || [];
+
+  console.log(`[fetchQuakes] USGS responded with ${features.length} feature(s). HTTP status: ${response.status}`);
 
   return features.map((f) => ({
     id: f.id,
