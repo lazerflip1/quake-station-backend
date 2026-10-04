@@ -97,8 +97,8 @@ async function saveNotifiedIds(deviceToken, idsSet) {
 // ─── USGS feed ────────────────────────────────────────────────────────────
 async function fetchQuakes() {
   const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  //const url = USGS_URL_BASE + tenMinutesAgo;
-  const url = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&starttime=2026-10-04T14:05:23.166Z&endtime=2026-10-04T14:20:27.016Z'
+  const url = USGS_URL_BASE + tenMinutesAgo;
+  
   console.log(`[fetchQuakes] Querying: ${url}`);
   console.log(`[fetchQuakes] Current time (Date.now()): ${new Date().toISOString()}`);
 
