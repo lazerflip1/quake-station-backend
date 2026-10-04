@@ -97,22 +97,36 @@ async function saveNotifiedIds(deviceToken, idsSet) {
 // ─── USGS feed ────────────────────────────────────────────────────────────
 async function fetchQuakes() {
   const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  const url = USGS_URL_BASE + tenMinutesAgo;
-
+  //const url = USGS_URL_BASE + tenMinutesAgo;
+  const url = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&starttime=2026-10-04T14:05:23.166Z&endtime=2026-10-04T14:20:27.016Z'
   console.log(`[fetchQuakes] Querying: ${url}`);
   console.log(`[fetchQuakes] Current time (Date.now()): ${new Date().toISOString()}`);
 
-  const response = await axios.get(url);
+  let response;
+  try {
+    response = await axios.get(url, {
+      // Force no caching, no compression weirdness, explicit JSON handling
+      headers: { 'Accept': 'application/geo+json, application/json' },
+      // Log the raw response size to rule out truncation
+      transformResponse: [(data) => {
+        console.log(`[fetchQuakes] Raw response body length (chars): ${typeof data === 'string' ? data.length : 'already parsed, type: ' + typeof data}`);
+        return typeof data === 'string' ? JSON.parse(data) : data;
+      }],
+    });
+  } catch (err) {
+    console.error(`[fetchQuakes] axios.get threw an error:`, err.message);
+    if (err.response) {
+      console.error(`[fetchQuakes] Error response status: ${err.response.status}, data:`, JSON.stringify(err.response.data).slice(0, 500));
+    }
+    throw err;
+  }
 
-  // New diagnostics: inspect the raw response before any processing.
+  console.log(`[fetchQuakes] response.headers:`, JSON.stringify(response.headers));
   console.log(`[fetchQuakes] Raw response.data.metadata:`, JSON.stringify(response.data.metadata));
   console.log(`[fetchQuakes] response.data.features is array: ${Array.isArray(response.data.features)}`);
   console.log(`[fetchQuakes] response.data.features.length (raw, before map): ${response.data.features ? response.data.features.length : 'undefined'}`);
 
   const features = response.data.features || [];
-
-  console.log(`[fetchQuakes] USGS responded with ${features.length} feature(s). HTTP status: ${response.status}`);
-
   const mapped = features.map((f) => ({
     id: f.id,
     mag: f.properties.mag,
@@ -121,7 +135,9 @@ async function fetchQuakes() {
     lat: f.geometry.coordinates[1],
   }));
 
+  console.log(`[fetchQuakes] USGS responded with ${features.length} feature(s). HTTP status: ${response.status}`);
   console.log(`[fetchQuakes] Mapped ${mapped.length} quake(s). IDs: ${mapped.map(q => q.id).join(', ')}`);
+  console.log(`[fetchQuakes] metadata.count vs features.length: ${response.data.metadata?.count} vs ${features.length}`);
 
   return mapped;
 }
