@@ -103,17 +103,27 @@ async function fetchQuakes() {
   console.log(`[fetchQuakes] Current time (Date.now()): ${new Date().toISOString()}`);
 
   const response = await axios.get(url);
+
+  // New diagnostics: inspect the raw response before any processing.
+  console.log(`[fetchQuakes] Raw response.data.metadata:`, JSON.stringify(response.data.metadata));
+  console.log(`[fetchQuakes] response.data.features is array: ${Array.isArray(response.data.features)}`);
+  console.log(`[fetchQuakes] response.data.features.length (raw, before map): ${response.data.features ? response.data.features.length : 'undefined'}`);
+
   const features = response.data.features || [];
 
   console.log(`[fetchQuakes] USGS responded with ${features.length} feature(s). HTTP status: ${response.status}`);
 
-  return features.map((f) => ({
+  const mapped = features.map((f) => ({
     id: f.id,
     mag: f.properties.mag,
     place: f.properties.place || '',
     lng: f.geometry.coordinates[0],
     lat: f.geometry.coordinates[1],
   }));
+
+  console.log(`[fetchQuakes] Mapped ${mapped.length} quake(s). IDs: ${mapped.map(q => q.id).join(', ')}`);
+
+  return mapped;
 }
 
 // ─── Shared core: evaluate a list of quakes against every user's rules ─────
