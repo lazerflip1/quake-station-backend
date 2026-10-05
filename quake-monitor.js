@@ -10,11 +10,14 @@ initializeApp({
 });
 
 const db = getFirestore();
-const messaging = getMessaging();
 
 console.log('Firebase Admin SDK initialized successfully!');
 
-const USGS_URL_BASE = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&starttime=';
+// updatedafter: returns every event created OR revised since that time,
+// regardless of when it actually happened. This catches big quakes that USGS
+// publishes 10-30+ minutes after their origin time.
+const USGS_URL_BASE = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&updatedafter=';
+const LOOKBACK_MS = 60 * 60 * 1000; // 1 hour. Must stay below NOTIFIED_TTL_MS.
 const NOTIFIED_COLLECTION = 'notified_quakes';
 const NOTIFIED_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -96,22 +99,16 @@ async function saveNotifiedIds(deviceToken, idsSet) {
 
 // ─── USGS feed ────────────────────────────────────────────────────────────
 async function fetchQuakes() {
-  const tenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  const url = USGS_URL_BASE + tenMinutesAgo;
-  
+  const since = new Date(Date.now() - LOOKBACK_MS).toISOString();
+  const url = USGS_URL_BASE + since;
+
   console.log(`[fetchQuakes] Querying: ${url}`);
-  console.log(`[fetchQuakes] Current time (Date.now()): ${new Date().toISOString()}`);
+  console.log(`[fetchQuakes] Current time: ${new Date().toISOString()}`);
 
   let response;
   try {
     response = await axios.get(url, {
-      // Force no caching, no compression weirdness, explicit JSON handling
       headers: { 'Accept': 'application/geo+json, application/json' },
-      // Log the raw response size to rule out truncation
-      transformResponse: [(data) => {
-        console.log(`[fetchQuakes] Raw response body length (chars): ${typeof data === 'string' ? data.length : 'already parsed, type: ' + typeof data}`);
-        return typeof data === 'string' ? JSON.parse(data) : data;
-      }],
     });
   } catch (err) {
     console.error(`[fetchQuakes] axios.get threw an error:`, err.message);
@@ -120,11 +117,6 @@ async function fetchQuakes() {
     }
     throw err;
   }
-
-  console.log(`[fetchQuakes] response.headers:`, JSON.stringify(response.headers));
-  console.log(`[fetchQuakes] Raw response.data.metadata:`, JSON.stringify(response.data.metadata));
-  console.log(`[fetchQuakes] response.data.features is array: ${Array.isArray(response.data.features)}`);
-  console.log(`[fetchQuakes] response.data.features.length (raw, before map): ${response.data.features ? response.data.features.length : 'undefined'}`);
 
   const features = response.data.features || [];
   const mapped = features.map((f) => ({
@@ -135,9 +127,17 @@ async function fetchQuakes() {
     lat: f.geometry.coordinates[1],
   }));
 
-  console.log(`[fetchQuakes] USGS responded with ${features.length} feature(s). HTTP status: ${response.status}`);
-  console.log(`[fetchQuakes] Mapped ${mapped.length} quake(s). IDs: ${mapped.map(q => q.id).join(', ')}`);
-  console.log(`[fetchQuakes] metadata.count vs features.length: ${response.data.metadata?.count} vs ${features.length}`);
+  console.log(`[fetchQuakes] HTTP ${response.status}, metadata.count=${response.data.metadata?.count}, features=${features.length}`);
+
+  // Lag check: origin time vs. last update time, to measure real USGS publication delay.
+  // Only M4+ to keep the output readable.
+  for (const f of features) {
+    if (f.properties.mag >= 4) {
+      const originMs = f.properties.time;
+      const updatedMs = f.properties.updated;
+      console.log(`[lag] ${f.id} M${f.properties.mag} ${f.properties.place} origin=${new Date(originMs).toISOString()} updated=${new Date(updatedMs).toISOString()} (${Math.round((updatedMs - originMs) / 60000)} min)`);
+    }
+  }
 
   return mapped;
 }
@@ -168,8 +168,15 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
       console.log(`${userTag} SKIPPED USER: globalEnabled is false.`);
       continue;
     }
-    if (!Array.isArray(user.rules) || user.rules.length === 0) {
-      console.log(`${userTag} SKIPPED USER: no rules configured.`);
+
+    // A user may have only a global threshold and no zone rules; they must
+    // still be evaluated (findMatchingRule handles the global threshold).
+    const hasRules = Array.isArray(user.rules) && user.rules.length > 0;
+    const hasGlobal = user.globalMinMagnitude != null;
+    const rules = hasRules ? user.rules : [];
+
+    if (!hasRules && !hasGlobal) {
+      console.log(`${userTag} SKIPPED USER: no rules and no global threshold.`);
       continue;
     }
     if (!deviceToken) {
@@ -177,7 +184,7 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
       continue;
     }
 
-    console.log(`${userTag} Evaluating with globalMinMagnitude=${user.globalMinMagnitude}, ${user.rules.length} rule(s): [${user.rules.map(r => `${r.label}(min:${r.minMagnitude}, r:${r.radiusKm}km)`).join(', ')}]`);
+    console.log(`${userTag} Evaluating with globalMinMagnitude=${user.globalMinMagnitude}, ${rules.length} rule(s): [${rules.map(r => `${r.label}(min:${r.minMagnitude}, r:${r.radiusKm}km)`).join(', ')}]`);
 
     const notifiedIds = dryRun ? new Set() : await loadNotifiedIds(deviceToken);
     let changed = false;
@@ -190,9 +197,17 @@ async function processQuakesForAllUsers(quakes, { dryRun = false, titlePrefix = 
         continue;
       }
 
-      const matchingRule = findMatchingRule(quake, user.rules, user.globalMinMagnitude);
+      const matchingRule = findMatchingRule(quake, rules, user.globalMinMagnitude);
       if (!matchingRule) {
-        console.log(`${quakeTag} SKIPPED: mag ${quake.mag} — no matching rule (global=${user.globalMinMagnitude}, zones checked: ${user.rules.length}).`);
+        if (quake.mag != null && quake.mag >= 3) {
+          // Show distance to every rule for quakes big enough to matter.
+          const dists = rules.map(r =>
+            `${r.label}: ${distanceKm(r.latitude, r.longitude, quake.lat, quake.lng).toFixed(0)}km (r=${r.radiusKm}, min=${r.minMagnitude})`
+          );
+          console.log(`${quakeTag} SKIPPED: M${quake.mag} ${quake.place} | global=${user.globalMinMagnitude} | ${dists.join(' | ') || 'no zone rules'}`);
+        } else {
+          console.log(`${quakeTag} SKIPPED: mag ${quake.mag} below all thresholds.`);
+        }
         continue;
       }
 
