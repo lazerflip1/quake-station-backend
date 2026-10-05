@@ -17,12 +17,14 @@ console.log('Firebase Admin SDK initialized successfully!');
 // regardless of when it actually happened. This catches big quakes that USGS
 // publishes 10-30+ minutes after their origin time.
 const USGS_URL_BASE = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&updatedafter=';
-const LOOKBACK_MS = 60 * 60 * 1000; // 1 hour. Must stay below NOTIFIED_TTL_MS.
+const LOOKBACK_MS = 60 * 60 * 1000; // 1 hour.
 // Ignore quakes that HAPPENED more than this long ago, even if USGS just revised
 // them (otherwise old events reprocessed by USGS could trigger stale notifications).
 const ORIGIN_CAP_MS = 24 * 60 * 60 * 1000; // 24 hours
 const NOTIFIED_COLLECTION = 'notified_quakes';
-const NOTIFIED_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+// Must be LONGER than ORIGIN_CAP_MS: a quake can be revised up to ORIGIN_CAP_MS after it
+// happened, and we must still remember we already notified it.
+const NOTIFIED_TTL_MS = 48 * 60 * 60 * 1000; // 48 hours
 
 // ─── Distance helper (Haversine, matches the client-side distanceKm) ───────
 function distanceKm(lat1, lon1, lat2, lon2) {
