@@ -18,6 +18,9 @@ console.log('Firebase Admin SDK initialized successfully!');
 // publishes 10-30+ minutes after their origin time.
 const USGS_URL_BASE = 'https://earthquake.usgs.gov/fdsnws/event/1/query?format=geojson&minmagnitude=1&updatedafter=';
 const LOOKBACK_MS = 60 * 60 * 1000; // 1 hour. Must stay below NOTIFIED_TTL_MS.
+// Ignore quakes that HAPPENED more than this long ago, even if USGS just revised
+// them (otherwise old events reprocessed by USGS could trigger stale notifications).
+const ORIGIN_CAP_MS = 24 * 60 * 60 * 1000; // 24 hours
 const NOTIFIED_COLLECTION = 'notified_quakes';
 const NOTIFIED_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
 
@@ -99,8 +102,9 @@ async function saveNotifiedIds(deviceToken, idsSet) {
 
 // ─── USGS feed ────────────────────────────────────────────────────────────
 async function fetchQuakes() {
-  const since = new Date(Date.now() - LOOKBACK_MS).toISOString();
-  const url = USGS_URL_BASE + since;
+  const updatedAfter = new Date(Date.now() - LOOKBACK_MS).toISOString();
+  const startTime = new Date(Date.now() - ORIGIN_CAP_MS).toISOString();
+  const url = `${USGS_URL_BASE}${updatedAfter}&starttime=${startTime}`;
 
   console.log(`[fetchQuakes] Querying: ${url}`);
   console.log(`[fetchQuakes] Current time: ${new Date().toISOString()}`);
