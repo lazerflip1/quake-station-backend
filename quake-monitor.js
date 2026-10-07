@@ -78,6 +78,8 @@ function buildPayload({ token, quake, matchingRule, titlePrefix = '' }) {
     data: {
       earthquakeId: String(quake.id),
       magnitude: String(quake.mag),
+      latitude: String(quake.lat),
+      longitude: String(quake.lng),
     },
     android: {
       priority: quake.mag >= 4.0 ? 'high' : 'normal',
